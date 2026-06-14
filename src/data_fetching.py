@@ -131,4 +131,4 @@ def get_coupled_signatures(
     X_coupled = np.hstack((X_spatial, X_tactical_scaled))
 
     logger.info(f"Extraction Complete. Coupled Shape: {X_coupled.shape}")
-    return X_spatial, X_tactical_scaled, X_coupled, tactical_keys
+    return X_spatial, X_tactical_raw, X_tactical_scaled, X_coupled, tactical_keys
