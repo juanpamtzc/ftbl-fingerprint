@@ -1,0 +1,11 @@
+streamlit
+numpy
+pandas
+statsbombpy
+scikit-learn
+torch
+matplotlib
+seaborn
+plotly
+mplsoccer
+scipy
