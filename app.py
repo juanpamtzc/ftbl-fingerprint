@@ -12,7 +12,7 @@ from mplsoccer import Pitch
 from scipy.spatial.distance import cosine
 import torch
 
-# Import our backend functions (No PCA!)
+# Import our backend functions
 from src.data_fetching import get_coupled_signatures
 from src.ml_models import train_autoencoder
 
@@ -58,9 +58,8 @@ if analyze_btn:
             st.error(f"Could not find sufficient data for {player_b}.")
             st.stop()
 
-        # Combine data to train a shared Autoencoder space
-        # (This takes about 2-3 seconds for a few dozen matches)
     with st.spinner("Training PyTorch Autoencoder on player match histories..."):
+        # Combine data to train a shared Autoencoder space
         X_combined = np.vstack((coup_A, coup_B))
         shared_ae = train_autoencoder(X_combined, latent_dim=3, epochs=800)
         
@@ -76,6 +75,19 @@ if analyze_btn:
     # --- PITCH VISUALIZATION BLOCK ---
     col1, col2 = st.columns(2)
     
+    # Clean up the ugly database labels
+    clean_labels = {
+        'passes_attempted': 'Passes Attempted',
+        'pass_completion_pct': 'Pass Completion %',
+        'shots': 'Shots',
+        'goals': 'Goals',
+        'assists': 'Assists',
+        'carries': 'Carries',
+        'dribbles': 'Dribbles',
+        'fouls_won': 'Fouls Won'
+    }
+    clean_feat_A = [clean_labels.get(f, f) for f in feat_A]
+    
     def draw_pitch_heatmap(spatial_vector, title):
         grid = spatial_vector.reshape(16, 24)
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -89,43 +101,67 @@ if analyze_btn:
     with col1:
         st.subheader(f"{player_a.split()[-2] if len(player_a.split()) > 1 else player_a}")
         st.pyplot(draw_pitch_heatmap(np.mean(sp_A, axis=0), "Average Spatial Footprint"))
-        df_A = pd.DataFrame({"Metric": feat_A, "Standardized Action Value": np.mean(tac_A, axis=0)})
-        st.bar_chart(df_A.set_index("Metric"))
+        
+        # Display cleaner bar chart with custom color
+        df_A = pd.DataFrame({"Metric": clean_feat_A, "Impact (Std Devs)": np.mean(tac_A, axis=0)})
+        st.bar_chart(df_A.set_index("Metric"), color="#00ffcc")
 
     with col2:
         st.subheader(f"{player_b.split()[-2] if len(player_b.split()) > 1 else player_b}")
         st.pyplot(draw_pitch_heatmap(np.mean(sp_B, axis=0), "Average Spatial Footprint"))
-        df_B = pd.DataFrame({"Metric": feat_B, "Standardized Action Value": np.mean(tac_B, axis=0)})
-        st.bar_chart(df_B.set_index("Metric"))
+        
+        # Display cleaner bar chart with custom color
+        df_B = pd.DataFrame({"Metric": clean_feat_A, "Impact (Std Devs)": np.mean(tac_B, axis=0)})
+        st.bar_chart(df_B.set_index("Metric"), color="#ff0066")
 
     # --- LATENT SPACE 3D VISUALIZATION ---
     st.markdown("---")
-    st.subheader("🌌 Deep Latent Space (Autoencoder DNA Mapping)")
-    st.markdown("Each dot represents a single match. Tightly grouped clusters represent a highly stable tactical identity.")
+    st.subheader("🌌 The Tactical Latent Space")
     
-    # Format data for Plotly
-    df_latent_A = pd.DataFrame(latent_A, columns=["Dim 1", "Dim 2", "Dim 3"])
+    # Add an explicit explanation for the user
+    st.info("""
+    **How to read this chart:**
+    * **Every dot** represents a single match played by the player.
+    * **The Axes** represent the core tactical drives discovered by the neural network (e.g., Playmaking, Finishing).
+    * **Close together:** If dots are clustered tightly, the player is highly consistent. If dots of two different players overlap, they fulfilled the exact same tactical role on the pitch.
+    """)
+    
+    df_latent_A = pd.DataFrame(latent_A, columns=["Playmaking Drive", "Pressure/Retention", "Finishing/Threat"])
     df_latent_A["Player"] = player_a
     
-    df_latent_B = pd.DataFrame(latent_B, columns=["Dim 1", "Dim 2", "Dim 3"])
+    df_latent_B = pd.DataFrame(latent_B, columns=["Playmaking Drive", "Pressure/Retention", "Finishing/Threat"])
     df_latent_B["Player"] = player_b
     
     df_latent_combined = pd.concat([df_latent_A, df_latent_B])
     
-    # 3D Scatter Plot
+    # Add Hover Data and Clean Axes
     fig_3d = px.scatter_3d(
-        df_latent_combined, x="Dim 1", y="Dim 2", z="Dim 3", 
+        df_latent_combined, 
+        x="Playmaking Drive", y="Pressure/Retention", z="Finishing/Threat", 
         color="Player", opacity=0.8,
-        color_discrete_sequence=["#00ffcc", "#ff0066"]
+        color_discrete_sequence=["#00ffcc", "#ff0066"],
+        hover_data=["Player"]
     )
-    fig_3d.update_layout(scene=dict(bgcolor="#1e1e1e"), paper_bgcolor="#0e1117", font=dict(color="white"))
+    
+    # Make the plot look professional and dark-themed
+    fig_3d.update_layout(
+        scene=dict(
+            bgcolor="#1e1e1e",
+            xaxis=dict(title='Dim 1: Playmaking', backgroundcolor="#1e1e1e", gridcolor="gray"),
+            yaxis=dict(title='Dim 2: Retention', backgroundcolor="#1e1e1e", gridcolor="gray"),
+            zaxis=dict(title='Dim 3: Finishing', backgroundcolor="#1e1e1e", gridcolor="gray"),
+        ),
+        paper_bgcolor="#0e1117", 
+        font=dict(color="white"),
+        margin=dict(l=0, r=0, b=0, t=0) # Remove awkward white space
+    )
     st.plotly_chart(fig_3d, use_container_width=True)
 
     # --- SIMILARITY MATRIX ---
     st.markdown("---")
     st.subheader("🧬 Non-Linear DNA Similarity")
     
-    # Now we measure similarity using the Neural Network's compressed Latent Vector
+    # Calculate Similarity using the Neural Network's compressed Latent Vector
     mean_latent_A = np.mean(latent_A, axis=0)
     mean_latent_B = np.mean(latent_B, axis=0)
     deep_sim = 1 - cosine(mean_latent_A, mean_latent_B)
