@@ -68,3 +68,46 @@ def train_autoencoder(X_coupled: np.ndarray, latent_dim: int = 3, epochs: int = 
             
     logger.info("Training complete.")
     return model
+
+def explain_autoencoder_black_box(
+    ae_model: nn.Module, X_coupled: np.ndarray, tactical_features: List[str]
+) -> None:
+    """Performs latent space traversal to decode the deep network dimensions.
+
+    Args:
+        ae_model: The trained PyTorch Autoencoder module.
+        X_coupled: Standardized matrix used for matching indices.
+        tactical_features: Ordered labels matching semantic columns.
+    """
+    logger.info("Executing non-linear latent traversal analysis...")
+    print("\n--- DECODING THE AUTOENCODER (LATENT TRAVERSAL) ---\n")
+    
+    ae_model.eval()
+    X_tensor = torch.FloatTensor(X_coupled)
+    
+    with torch.no_grad():
+        _, latent_space = ae_model(X_tensor)
+        mean_latent = torch.mean(latent_space, dim=0)
+        baseline_output = ae_model.decoder(mean_latent).detach().numpy()
+        
+        num_spatial = X_coupled.shape[1] - len(tactical_features)
+        baseline_tactical = baseline_output[num_spatial:]
+        
+        perturbation_amount = 2.0 
+        
+        for dim in range(3):
+            print(f"### What does Latent Dimension {dim+1} control?")
+            perturbed_latent = mean_latent.clone()
+            perturbed_latent[dim] += perturbation_amount
+            
+            perturbed_output = ae_model.decoder(perturbed_latent).detach().numpy()
+            perturbed_tactical = perturbed_output[num_spatial:]
+            
+            deltas = perturbed_tactical - baseline_tactical
+            impacts = list(zip(tactical_features, deltas))
+            impacts.sort(key=lambda x: abs(x[1]), reverse=True)
+            
+            for feature, delta in impacts[:4]: 
+                direction = "INCREASES" if delta > 0 else "DECREASES"
+                print(f"  -> Pushing Dim {dim+1} {direction} {feature:<20} by {abs(delta):>5.2f} std devs")
+            print()
