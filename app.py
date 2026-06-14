@@ -1,173 +1,176 @@
 """
-Tactical Engine - Streamlit Frontend (Deep Learning Edition)
+Tactical Engine - Streamlit Frontend (Offline Database Edition)
 Run with: streamlit run app.py
 """
 
 import streamlit as st
-import numpy as np
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import plotly.express as px
 from mplsoccer import Pitch
 from scipy.spatial.distance import cosine
-import torch
-
-# Import our backend functions
-from src.data_fetching import get_coupled_signatures
-from src.ml_models import train_autoencoder
 
 st.set_page_config(page_title="Deep Tactical Engine", layout="wide")
 
+# --- CACHED DATABASE LOADING ---
+# This reads our CSV once and keeps it in lightning-fast RAM
 @st.cache_data
-def fetch_player_data(player_name, comp_id, season_id):
+def load_database():
     try:
-        # UPDATED: Now catching the raw tactical matrix as well
-        X_spatial, X_tactical_raw, X_tactical_scaled, X_coupled, features = get_coupled_signatures(
-            competition_id=comp_id, 
-            season_id=season_id, 
-            player_name=player_name
-        )
-        return X_spatial, X_tactical_raw, X_tactical_scaled, X_coupled, features
-    except Exception as e:
-        return None, None, None, None, None
+        df = pd.read_csv("tactical_database.csv")
+        return df
+    except FileNotFoundError:
+        st.error("Database not found! Please run `python build_database.py` first.")
+        st.stop()
 
-# --- UI LAYOUT ---
+df_db = load_database()
+
+# Define the tactical columns based on our extraction keys
+tactical_cols = [
+    'passes_attempted', 'pass_completion_pct', 'shots', 
+    'goals', 'assists', 'carries', 'dribbles', 'fouls_won'
+]
+
+clean_labels = {
+    'passes_attempted': 'Passes',
+    'pass_completion_pct': 'Pass Comp %',
+    'shots': 'Shots',
+    'goals': 'Goals',
+    'assists': 'Assists',
+    'carries': 'Carries',
+    'dribbles': 'Dribbles',
+    'fouls_won': 'Fouls Won'
+}
+clean_feat_names = [clean_labels.get(col, col) for col in tactical_cols]
+
+# Extract spatial columns (spatial_0 to spatial_383)
+spatial_cols = [f"spatial_{i}" for i in range(384)]
+latent_cols = ["Dim_1_Playmaking", "Dim_2_Retention", "Dim_3_Finishing"]
+
+# --- UI LAYOUT & DROPDOWNS ---
 st.title("🧠 Deep Tactical Signature Profiling")
-st.markdown("Map non-linear tactical footprints and latent space DNA between players.")
+st.markdown("Compare players in a universal, fixed 3D Tactical Latent Space.")
 
-st.sidebar.header("Match Selection Parameters")
-comp_id = st.sidebar.number_input("Competition ID (StatsBomb)", value=11)
-season_id = st.sidebar.number_input("Season ID", value=22)
+players_available = sorted(df_db['Player'].unique())
 
-st.sidebar.header("Player A")
-player_a = st.sidebar.text_input("Full Name A", value="Lionel Andrés Messi Cuccittini")
+st.sidebar.header("Player A Selection")
+player_a = st.sidebar.selectbox("Player A Name", players_available, index=0)
+seasons_a = sorted(df_db[df_db['Player'] == player_a]['Season'].unique())
+season_a = st.sidebar.selectbox("Player A Season", seasons_a, index=0)
 
-st.sidebar.header("Player B")
-player_b = st.sidebar.text_input("Full Name B", value="Andrés Iniesta Luján")
+st.sidebar.header("Player B Selection")
+# Default to a different player if possible, otherwise same player
+default_b_index = 1 if len(players_available) > 1 else 0
+player_b = st.sidebar.selectbox("Player B Name", players_available, index=default_b_index)
+seasons_b = sorted(df_db[df_db['Player'] == player_b]['Season'].unique())
+season_b = st.sidebar.selectbox("Player B Season", seasons_b, index=0)
 
-analyze_btn = st.sidebar.button("Generate Deep Profiles")
+# Extract subsets for the specific players and seasons
+df_A = df_db[(df_db['Player'] == player_a) & (df_db['Season'] == season_a)]
+df_B = df_db[(df_db['Player'] == player_b) & (df_db['Season'] == season_b)]
 
-if analyze_btn:
-    with st.spinner(f"Extracting match vectors for {player_a} and {player_b}..."):
-        # UPDATED: Catching the raw data (raw_tac_A and raw_tac_B)
-        sp_A, raw_tac_A, tac_A, coup_A, feat_A = fetch_player_data(player_a, comp_id, season_id)
-        sp_B, raw_tac_B, tac_B, coup_B, feat_B = fetch_player_data(player_b, comp_id, season_id)
-        
-        if sp_A is None or len(sp_A) == 0:
-            st.error(f"Could not find sufficient data for {player_a}.")
-            st.stop()
-        if sp_B is None or len(sp_B) == 0:
-            st.error(f"Could not find sufficient data for {player_b}.")
-            st.stop()
+if len(df_A) == 0 or len(df_B) == 0:
+    st.warning("No data available for this specific selection.")
+    st.stop()
 
-    with st.spinner("Training PyTorch Autoencoder on player match histories..."):
-        # We STILL train the network on the SCALED coupled matrices (coup_A, coup_B)
-        X_combined = np.vstack((coup_A, coup_B))
-        shared_ae = train_autoencoder(X_combined, latent_dim=3, epochs=800)
-        
-        shared_ae.eval()
-        with torch.no_grad():
-            _, latent_A = shared_ae(torch.FloatTensor(coup_A))
-            _, latent_B = shared_ae(torch.FloatTensor(coup_B))
-            
-            latent_A = latent_A.numpy()
-            latent_B = latent_B.numpy()
+# --- CALCULATE AVERAGES ---
+# Averages for the Bar Charts and Pitches
+mean_spatial_A = df_A[spatial_cols].mean().values
+mean_spatial_B = df_B[spatial_cols].mean().values
 
-    # --- PITCH VISUALIZATION BLOCK ---
-    col1, col2 = st.columns(2)
-    
-    clean_labels = {
-        'passes_attempted': 'Passes',
-        'pass_completion_pct': 'Pass Comp %',
-        'shots': 'Shots',
-        'goals': 'Goals',
-        'assists': 'Assists',
-        'carries': 'Carries',
-        'dribbles': 'Dribbles',
-        'fouls_won': 'Fouls Won'
-    }
-    clean_feat_A = [clean_labels.get(f, f) for f in feat_A]
-    
-    def draw_pitch_heatmap(spatial_vector, title):
-        grid = spatial_vector.reshape(16, 24)
-        fig, ax = plt.subplots(figsize=(8, 5))
-        pitch = Pitch(pitch_type='statsbomb', pitch_color='#22312b', line_color='#c7d5cc')
-        pitch.draw(ax=ax)
-        ax.imshow(grid, extent=(0, 120, 80, 0), aspect='auto', cmap='magma', alpha=0.7)
-        ax.set_title(title, color='white', fontsize=14)
-        fig.patch.set_facecolor('#22312b')
-        return fig
+mean_tac_A = df_A[tactical_cols].mean().values
+mean_tac_B = df_B[tactical_cols].mean().values
 
-    with col1:
-        st.subheader(f"{player_a.split()[-2] if len(player_a.split()) > 1 else player_a}")
-        st.pyplot(draw_pitch_heatmap(np.mean(sp_A, axis=0), "Average Spatial Footprint"))
-        
-        # UPDATED: We are now plotting the RAW averages! 
-        df_A = pd.DataFrame({"Metric": clean_feat_A, "Per Match Average": np.mean(raw_tac_A, axis=0)})
-        st.bar_chart(df_A.set_index("Metric"), color="#00ffcc")
+mean_latent_A = df_A[latent_cols].mean().values
+mean_latent_B = df_B[latent_cols].mean().values
 
-    with col2:
-        st.subheader(f"{player_b.split()[-2] if len(player_b.split()) > 1 else player_b}")
-        st.pyplot(draw_pitch_heatmap(np.mean(sp_B, axis=0), "Average Spatial Footprint"))
-        
-        # UPDATED: We are now plotting the RAW averages!
-        df_B = pd.DataFrame({"Metric": clean_feat_A, "Per Match Average": np.mean(raw_tac_B, axis=0)})
-        st.bar_chart(df_B.set_index("Metric"), color="#ff0066")
+# --- PITCH VISUALIZATION BLOCK ---
+col1, col2 = st.columns(2)
 
-    # --- LATENT SPACE 3D VISUALIZATION ---
-    st.markdown("---")
-    st.subheader("🌌 The Tactical Latent Space")
-    
-    st.info("""
-    **How to read this chart:**
-    * **Every dot** represents a single match played by the player.
-    * **The Axes** represent the core tactical drives discovered by the neural network (e.g., Playmaking, Finishing).
-    * **Close together:** If dots are clustered tightly, the player is highly consistent. If dots of two different players overlap, they fulfilled the exact same tactical role on the pitch.
-    """)
-    
-    df_latent_A = pd.DataFrame(latent_A, columns=["Playmaking Drive", "Pressure/Retention", "Finishing/Threat"])
-    df_latent_A["Player"] = player_a
-    
-    df_latent_B = pd.DataFrame(latent_B, columns=["Playmaking Drive", "Pressure/Retention", "Finishing/Threat"])
-    df_latent_B["Player"] = player_b
-    
-    df_latent_combined = pd.concat([df_latent_A, df_latent_B])
-    
-    fig_3d = px.scatter_3d(
-        df_latent_combined, 
-        x="Playmaking Drive", y="Pressure/Retention", z="Finishing/Threat", 
-        color="Player", opacity=0.8,
-        color_discrete_sequence=["#00ffcc", "#ff0066"],
-        hover_data=["Player"]
-    )
-    
-    fig_3d.update_layout(
-        scene=dict(
-            bgcolor="#1e1e1e",
-            xaxis=dict(title='Dim 1: Playmaking', backgroundcolor="#1e1e1e", gridcolor="gray"),
-            yaxis=dict(title='Dim 2: Retention', backgroundcolor="#1e1e1e", gridcolor="gray"),
-            zaxis=dict(title='Dim 3: Finishing', backgroundcolor="#1e1e1e", gridcolor="gray"),
-        ),
-        paper_bgcolor="#0e1117", 
-        font=dict(color="white"),
-        margin=dict(l=0, r=0, b=0, t=0)
-    )
-    st.plotly_chart(fig_3d, use_container_width=True)
+def draw_pitch_heatmap(spatial_vector, title):
+    grid = spatial_vector.reshape(16, 24)
+    fig, ax = plt.subplots(figsize=(8, 5))
+    pitch = Pitch(pitch_type='statsbomb', pitch_color='#22312b', line_color='#c7d5cc')
+    pitch.draw(ax=ax)
+    ax.imshow(grid, extent=(0, 120, 80, 0), aspect='auto', cmap='magma', alpha=0.7)
+    ax.set_title(title, color='white', fontsize=14)
+    fig.patch.set_facecolor('#22312b')
+    return fig
 
-    # --- SIMILARITY MATRIX ---
-    st.markdown("---")
-    st.subheader("🧬 Non-Linear DNA Similarity")
+# Format names for cleaner display
+name_a_clean = f"{player_a.split()[-2] if len(player_a.split()) > 1 else player_a} ({season_a})"
+name_b_clean = f"{player_b.split()[-2] if len(player_b.split()) > 1 else player_b} ({season_b})"
+
+with col1:
+    st.subheader(f"Player A: {name_a_clean}")
+    st.pyplot(draw_pitch_heatmap(mean_spatial_A, "Average Spatial Footprint"))
     
-    mean_latent_A = np.mean(latent_A, axis=0)
-    mean_latent_B = np.mean(latent_B, axis=0)
-    deep_sim = 1 - cosine(mean_latent_A, mean_latent_B)
+    chart_df_A = pd.DataFrame({"Metric": clean_feat_names, "Per Match Average": mean_tac_A})
+    st.bar_chart(chart_df_A.set_index("Metric"), color="#00ffcc")
+
+with col2:
+    st.subheader(f"Player B: {name_b_clean}")
+    st.pyplot(draw_pitch_heatmap(mean_spatial_B, "Average Spatial Footprint"))
     
-    spatial_sim = 1 - cosine(np.mean(sp_A, axis=0), np.mean(sp_B, axis=0))
-    tactical_sim = 1 - cosine(np.mean(tac_A, axis=0), np.mean(tac_B, axis=0))
-    
-    sim_data = pd.DataFrame({
-        "Similarity Dimension": ["Spatial (Raw Pitch Location)", "Semantic (Standardized Match Actions)", "Deep Latent DNA (Autoencoder Vector)"],
-        "Similarity Score (0-1)": [spatial_sim, tactical_sim, deep_sim]
-    })
-    
-    st.table(sim_data.style.background_gradient(cmap='Purples', subset=['Similarity Score (0-1)']))
+    chart_df_B = pd.DataFrame({"Metric": clean_feat_names, "Per Match Average": mean_tac_B})
+    st.bar_chart(chart_df_B.set_index("Metric"), color="#ff0066")
+
+# --- LATENT SPACE 3D VISUALIZATION ---
+st.markdown("---")
+st.subheader("🌌 The Universal Tactical Latent Space")
+
+st.info("""
+**How to read this chart:**
+* **Every dot** represents a single match.
+* **The Space is Fixed:** This 3D universe was built across all players and seasons. The axes will never shift.
+* Compare **Messi 11/12** vs **Messi 15/16** to see how his DNA drifted, or compare **Xavi** vs **Iniesta** to see role overlap.
+""")
+
+# Prepare data for 3D plot
+plot_df_A = df_A.copy()
+plot_df_A['Label'] = name_a_clean
+
+plot_df_B = df_B.copy()
+plot_df_B['Label'] = name_b_clean
+
+plot_df_combined = pd.concat([plot_df_A, plot_df_B])
+
+fig_3d = px.scatter_3d(
+    plot_df_combined, 
+    x="Dim_1_Playmaking", y="Dim_2_Retention", z="Dim_3_Finishing", 
+    color="Label", opacity=0.8,
+    color_discrete_sequence=["#00ffcc", "#ff0066"],
+    hover_data=["Player", "Season"]
+)
+
+fig_3d.update_layout(
+    scene=dict(
+        bgcolor="#1e1e1e",
+        xaxis=dict(title='Dim 1: Playmaking', backgroundcolor="#1e1e1e", gridcolor="gray"),
+        yaxis=dict(title='Dim 2: Retention', backgroundcolor="#1e1e1e", gridcolor="gray"),
+        zaxis=dict(title='Dim 3: Finishing', backgroundcolor="#1e1e1e", gridcolor="gray"),
+    ),
+    paper_bgcolor="#0e1117", 
+    font=dict(color="white"),
+    margin=dict(l=0, r=0, b=0, t=0),
+    legend_title_text="Selection"
+)
+st.plotly_chart(fig_3d, use_container_width=True)
+
+# --- SIMILARITY MATRIX ---
+st.markdown("---")
+st.subheader("🧬 Tactical DNA Similarity Matrix")
+
+# Calculate Cosine Similarity (1 - distance). 
+# We add a tiny epsilon (1e-9) to avoid division by zero if a vector is completely empty.
+spatial_sim = 1 - cosine(mean_spatial_A + 1e-9, mean_spatial_B + 1e-9)
+tactical_sim = 1 - cosine(mean_tac_A + 1e-9, mean_tac_B + 1e-9)
+deep_sim = 1 - cosine(mean_latent_A + 1e-9, mean_latent_B + 1e-9)
+
+sim_data = pd.DataFrame({
+    "Similarity Dimension": ["Spatial (Where)", "Semantic (What)", "Deep Latent DNA (Overall Role)"],
+    "Similarity Score (0-1)": [spatial_sim, tactical_sim, deep_sim]
+})
+
+st.table(sim_data.style.background_gradient(cmap='Purples', subset=['Similarity Score (0-1)']))
