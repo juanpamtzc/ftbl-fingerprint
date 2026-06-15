@@ -27,77 +27,113 @@ tactical_keys = [
     'total_action_distance', 'avg_deceleration'
 ]
 
-# --- 2. UI HEADER ---
-st.title("⚽ Intelligent Latent Scouting Engine")
-st.markdown("""
-**Distance Metric (Self-Variance Units):** A score of `1.0x` means the replacement plays exactly as similar to the target as the target does to themselves on average. A global color scale is used: green indicates a true tactical twin, while red indicates no similar players exist.
-""")
+# --- 2. UI HEADER & EDUCATIONAL GLOSSARY ---
+st.title("⚽ Intelligent Tactical Scouting Engine")
 
+with st.expander("📖 How to use this engine (Glossary)"):
+    st.markdown("""
+    **For Non-Technical Users:**
+    * **Self-Variance Multiplier:** Players are not robots; they play slightly differently every game. A score of `1.0x` means a replacement plays exactly as similar to the target as the target does to themselves. 
+    * **Scores < 1.0x (True Twins):** The replacement is indistinguishable from the target.
+    * **Scores > 2.0x (Different Profile):** The replacement plays a fundamentally different role on the pitch.
+    
+    **For Technical Users:**
+    * **PCA (Linear Baseline):** Projects 112 features onto 16 orthogonal axes. Best for isolating massive volume differences (like total passes or total distance).
+    * **VAE (Deep Neural Network):** A Variational Autoencoder that folds the 112 dimensions into a non-linear continuous space. Best for capturing complex, contextual behaviors.
+    """)
+
+st.divider()
+
+# --- 3. SEARCH CONTROLS ---
 col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([2, 2, 1])
 with col_ctrl1:
-    target_player = st.selectbox("Target Player:", players)
+    target_player = st.selectbox("Target Player to Scout:", players, 
+                                 help="Select the player you are trying to replace.")
 with col_ctrl2:
-    model_choice = st.radio("Underlying Architecture:", ["PCA (Linear Baseline)", "VAE (Non-Linear Manifold)"], horizontal=True)
+    model_choice = st.radio("Underlying AI Architecture:", 
+                            ["PCA (Linear Baseline)", "VAE (Non-Linear Manifold)"], 
+                            horizontal=True,
+                            help="Toggle the mathematical brain used to calculate similarities.")
 with col_ctrl3:
-    n_results = st.slider("Top N Replacements:", 1, 10, 5)
+    n_results = st.slider("Top N Replacements:", 1, 10, 5, 
+                          help="Number of similar players to display in the table.")
 
-# --- 3. DISTANCE CALCULATION & NORMALIZATION ---
+# --- 4. DISTANCE CALCULATION & NORMALIZATION ---
 active_df = pca_centroids if "PCA" in model_choice else vae_centroids
 baseline_dist = metadata.loc["PCA" if "PCA" in model_choice else "VAE", "Self_Distance_Baseline"]
 
 target_vector = active_df.loc[target_player].values.reshape(1, -1)
 distances = cdist(target_vector, active_df.values, metric='euclidean').flatten()
 
-# Normalize distances
 norm_distances = distances / baseline_dist
 
 df_results = pd.DataFrame({
     'Player': active_df.index,
-    'Distance (Self-Variance Multiplier)': norm_distances
-}).sort_values('Distance (Self-Variance Multiplier)')
+    'Distance Multiplier': norm_distances
+}).sort_values('Distance Multiplier')
 
-df_replacements = df_results[df_results['Player'] != target_player].head(n_results)
+# Filter out the target player themselves
+df_others = df_results[df_results['Player'] != target_player]
+df_replacements = df_others.head(n_results)
 best_match = df_replacements.iloc[0]['Player']
 
-# --- 4. TOP PANELS: TABLE & POPULATION PLOT ---
+# --- 5. THE REPLACEABILITY BANNER ---
+clones_count = len(df_others[df_others['Distance Multiplier'] <= 1.0])
+peers_count = len(df_others[(df_others['Distance Multiplier'] > 1.0) & (df_others['Distance Multiplier'] <= 2.0)])
+
+if clones_count == 0:
+    replaceability_tier = "🦄 IRREPLACEABLE (Unicorn)"
+    banner_color = "normal" # Default Streamlit blue/grey
+    st.info(f"**{target_player} is a Unicorn.** There are no players in this database who replicate their output seamlessly. You will have to change your tactical system if they leave.", icon="⚠️")
+elif clones_count <= 3:
+    replaceability_tier = "⭐ HARD TO REPLACE (Rare)"
+    st.warning(f"**{target_player} has a Rare Profile.** There are only {clones_count} true tactical twins in the league. Securing a replacement will be highly competitive.", icon="🔍")
+else:
+    replaceability_tier = "🔄 REPLACEABLE (Standard Profile)"
+    st.success(f"**{target_player} has a Standard Profile.** There are {clones_count} players who provide an identical tactical footprint. You have high leverage in the transfer market.", icon="✅")
+
+col_metric1, col_metric2, col_metric3 = st.columns(3)
+col_metric1.metric("Market Status", replaceability_tier)
+col_metric2.metric("True Twins (< 1.0x Variance)", f"{clones_count} Players", help="Players statistically indistinguishable from the target.")
+col_metric3.metric("Tactical Peers (1.0x - 2.0x Variance)", f"{peers_count} Players", help="Players who play similarly but have distinct individual quirks.")
+
+st.divider()
+
+# --- 6. TOP PANELS: TABLE & POPULATION PLOT ---
 col_table, col_plot = st.columns([1, 1.5])
 
 with col_table:
-    st.subheader(f"Closest Tactical Twins")
-    # Apply global color scale (0.0 to 5.0)
+    st.subheader(f"Closest Statistical Matches")
     st.dataframe(
         df_replacements.style.background_gradient(
-            cmap='RdYlGn_r', vmin=0.5, vmax=5.0, subset=['Distance (Self-Variance Multiplier)']
-        ).format({'Distance (Self-Variance Multiplier)': "{:.2f}x"}),
+            cmap='RdYlGn_r', vmin=0.5, vmax=5.0, subset=['Distance Multiplier']
+        ).format({'Distance Multiplier': "{:.2f}x"}),
         use_container_width=True, hide_index=True
     )
 
 with col_plot:
-    st.subheader("Global Player Similarity Distribution")
-    # Plotly Histogram of all players
+    st.subheader("League Similarity Distribution")
     fig = px.histogram(
-        df_results[df_results['Player'] != target_player], 
-        x="Distance (Self-Variance Multiplier)", 
-        nbins=50,
+        df_others, 
+        x="Distance Multiplier", 
+        nbins=40,
         color_discrete_sequence=['#4C72B0'],
-        labels={'Distance (Self-Variance Multiplier)': 'Similarity (Lower is better)'}
+        labels={'Distance Multiplier': 'Similarity Score (Lower is better)'}
     )
-    # Add threshold lines
-    fig.add_vline(x=1.0, line_dash="dash", line_color="green", annotation_text="Self-Variance (1.0x)")
-    fig.add_vline(x=df_replacements.iloc[-1]['Distance (Self-Variance Multiplier)'], 
-                  line_dash="dot", line_color="red", annotation_text=f"Top {n_results} Cutoff")
+    fig.add_vline(x=1.0, line_dash="dash", line_color="green", annotation_text="Target's Own Variance (1.0x)")
+    fig.add_vline(x=2.0, line_dash="dot", line_color="orange", annotation_text="Tactical Peer Limit (2.0x)")
     fig.update_layout(margin=dict(l=0, r=0, t=30, b=0), height=300)
     st.plotly_chart(fig, use_container_width=True)
 
 st.divider()
 
-# --- 5. BOTTOM PANELS: HEAD-TO-HEAD COMPARISON ---
-st.subheader(f"Head-to-Head: {target_player} vs {best_match}")
+# --- 7. BOTTOM PANELS: HEAD-TO-HEAD COMPARISON ---
+st.subheader(f"Head-to-Head Proof: {target_player} vs {best_match}")
 
 col_pitch, col_stats = st.columns([1, 1.2])
 
 with col_pitch:
-    st.markdown("**Spatial Heatmap (Pitch Dominance)**")
+    st.markdown("**Spatial Heatmap (Where they play)**")
     
     target_spatial = raw_centroids.loc[target_player][[f'Spatial_{i}' for i in range(96)]].values.reshape(8, 12)
     match_spatial = raw_centroids.loc[best_match][[f'Spatial_{i}' for i in range(96)]].values.reshape(8, 12)
@@ -115,7 +151,7 @@ with col_pitch:
     st.pyplot(fig)
 
 with col_stats:
-    st.markdown("**Tactical & Kinematic Profiles (Scaled)**")
+    st.markdown("**Tactical & Kinematic Profiles (How they play)**")
     
     target_stats = raw_centroids.loc[target_player][tactical_keys].values
     match_stats = raw_centroids.loc[best_match][tactical_keys].values
