@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import pandas as pd
 import numpy as np
+from typing import Tuple, List
 
 class TacticalVAE(nn.Module):
     def __init__(self, input_dim, latent_dim):
