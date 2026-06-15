@@ -5,7 +5,7 @@
 
 An intelligent scouting engine that uses deep non-linear manifold mapping (Variational Autoencoders) and high-resolution kinematic tracking to find statistically identical tactical replacements for elite football players.
 
-![Portfolio Thumbnail](portfolio_thumbnail.png)
+![Portfolio Thumbnail](./assets/portfolio_thumbnail.png)
 
 ## 🧠 Methodology
 Instead of relying on basic volume stats, this engine builds a **112+ Dimensional Fingerprint** for every player:
