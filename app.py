@@ -39,8 +39,8 @@ with st.expander("📖 How to use this engine"):
     st.markdown("""
     **For Non-Technical Users:**
     * **Self-Variance Multiplier:** Players play slightly differently every game. A score of `1.0x` means a replacement plays as similar to the target as the target does to themselves across a season. 
-    * **Scores < 1.0x (True Twins):** The replacement is statistically indistinguishable from the target.
-    * **Scores > 2.0x (Different Profile):** The replacement plays a fundamentally different role on the pitch.
+    * * **< 1.0x (True Twins):** The replacement is statistically indistinguishable from the target.
+    * * **> 2.0x (Different Profile):** The replacement plays a fundamentally different role on the pitch.
     
     **For Technical Users:**
     * **PCA (Linear Baseline):** Projects the 112 features onto 16 orthogonal axes. Best for isolating massive volume differences (like total passes or total distance).
