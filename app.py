@@ -5,6 +5,7 @@ from scipy.spatial.distance import cdist
 import matplotlib.pyplot as plt
 import plotly.express as px
 import plotly.graph_objects as go
+from mplsoccer import Pitch
 
 st.set_page_config(page_title="AI Scouting Engine", layout="wide")
 
@@ -17,8 +18,12 @@ def load_data():
     meta_df = pd.read_csv("model_metadata.csv", index_col="Model")
     return pca_df, vae_df, raw_df, meta_df
 
-pca_centroids, vae_centroids, raw_centroids, metadata = load_data()
-players = sorted(pca_centroids.index.tolist())
+try:
+    pca_centroids, vae_centroids, raw_centroids, metadata = load_data()
+    players = sorted(pca_centroids.index.tolist())
+except FileNotFoundError:
+    st.error("Data files not found. Please run `python main.py` locally to generate the CSVs, and push them to your repository.")
+    st.stop()
 
 tactical_keys = [
     'passes_attempted', 'pass_completion_pct', 'shots', 'goals', 'assists', 
@@ -33,13 +38,13 @@ st.title("⚽ Intelligent Tactical Scouting Engine")
 with st.expander("📖 How to use this engine (Glossary)"):
     st.markdown("""
     **For Non-Technical Users:**
-    * **Self-Variance Multiplier:** Players are not robots; they play slightly differently every game. A score of `1.0x` means a replacement plays exactly as similar to the target as the target does to themselves. 
-    * **Scores < 1.0x (True Twins):** The replacement is indistinguishable from the target.
+    * **Self-Variance Multiplier:** Players are not robots; they play slightly differently every game. A score of `1.0x` means a replacement plays exactly as similar to the target as the target does to themselves across a season. 
+    * **Scores < 1.0x (True Twins):** The replacement is statistically indistinguishable from the target.
     * **Scores > 2.0x (Different Profile):** The replacement plays a fundamentally different role on the pitch.
     
     **For Technical Users:**
-    * **PCA (Linear Baseline):** Projects 112 features onto 16 orthogonal axes. Best for isolating massive volume differences (like total passes or total distance).
-    * **VAE (Deep Neural Network):** A Variational Autoencoder that folds the 112 dimensions into a non-linear continuous space. Best for capturing complex, contextual behaviors.
+    * **PCA (Linear Baseline):** Projects the 112 features onto 16 orthogonal axes. Best for isolating massive volume differences (like total passes or total distance).
+    * **VAE (Deep Neural Network):** A Variational Autoencoder that folds the dimensions into a non-linear continuous space. Best for capturing complex, contextual behaviors.
     """)
 
 st.divider()
@@ -83,7 +88,6 @@ peers_count = len(df_others[(df_others['Distance Multiplier'] > 1.0) & (df_other
 
 if clones_count == 0:
     replaceability_tier = "🦄 IRREPLACEABLE (Unicorn)"
-    banner_color = "normal" # Default Streamlit blue/grey
     st.info(f"**{target_player} is a Unicorn.** There are no players in this database who replicate their output seamlessly. You will have to change your tactical system if they leave.", icon="⚠️")
 elif clones_count <= 3:
     replaceability_tier = "⭐ HARD TO REPLACE (Rare)"
@@ -135,33 +139,49 @@ col_pitch, col_stats = st.columns([1, 1.2])
 with col_pitch:
     st.markdown("**Spatial Heatmap (Where they play)**")
     
-    target_spatial = raw_centroids.loc[target_player][[f'Spatial_{i}' for i in range(96)]].values.reshape(8, 12)
-    match_spatial = raw_centroids.loc[best_match][[f'Spatial_{i}' for i in range(96)]].values.reshape(8, 12)
+    # Dynamically determine the mesh resolution from the raw data columns
+    spatial_cols = [c for c in raw_centroids.columns if 'Spatial_' in c]
+    n_bins = len(spatial_cols)
+    y_bins = int(np.sqrt(n_bins / 1.5)) 
+    x_bins = int(y_bins * 1.5)
     
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+    target_spatial = raw_centroids.loc[target_player][spatial_cols].values.reshape(x_bins, y_bins).T
+    match_spatial = raw_centroids.loc[best_match][spatial_cols].values.reshape(x_bins, y_bins).T
     
-    axes[0].imshow(target_spatial, cmap='magma', extent=[0, 120, 0, 80], origin='lower')
-    axes[0].set_title(f"{target_player}\n(Target)")
-    axes[0].axis('off')
+    # Using mplsoccer for the pitch plotting
+    pitch = Pitch(pitch_type='statsbomb', pitch_color='#22312b', line_color='#c7d5cc')
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    fig.patch.set_facecolor('#22312b')
     
-    axes[1].imshow(match_spatial, cmap='magma', extent=[0, 120, 0, 80], origin='lower')
-    axes[1].set_title(f"{best_match}\n(Closest Match)")
-    axes[1].axis('off')
+    pitch.draw(ax=axes[0])
+    axes[0].imshow(target_spatial, extent=[0, 120, 80, 0], aspect='auto', cmap='magma', alpha=0.8, zorder=2)
+    axes[0].set_title(f"{target_player}\n(Target)", color='white', fontsize=12)
+    
+    pitch.draw(ax=axes[1])
+    axes[1].imshow(match_spatial, extent=[0, 120, 80, 0], aspect='auto', cmap='magma', alpha=0.8, zorder=2)
+    axes[1].set_title(f"{best_match}\n(Closest Match)", color='white', fontsize=12)
     
     st.pyplot(fig)
 
 with col_stats:
     st.markdown("**Tactical & Kinematic Profiles (How they play)**")
     
+    # Normalize stats for better radar visualization (0 to 1 scale roughly)
     target_stats = raw_centroids.loc[target_player][tactical_keys].values
     match_stats = raw_centroids.loc[best_match][tactical_keys].values
     
+    # Simple max scaling relative to the two players for visualization purposes
+    max_vals = np.maximum(target_stats, match_stats)
+    max_vals[max_vals == 0] = 1 # avoid div by zero
+    t_scaled = target_stats / max_vals
+    m_scaled = match_stats / max_vals
+    
     fig_radar = go.Figure()
     fig_radar.add_trace(go.Scatterpolar(
-        r=target_stats, theta=tactical_keys, fill='toself', name=target_player, marker=dict(color='blue')
+        r=t_scaled, theta=tactical_keys, fill='toself', name=target_player, marker=dict(color='blue')
     ))
     fig_radar.add_trace(go.Scatterpolar(
-        r=match_stats, theta=tactical_keys, fill='toself', name=best_match, marker=dict(color='orange')
+        r=m_scaled, theta=tactical_keys, fill='toself', name=best_match, marker=dict(color='orange')
     ))
     fig_radar.update_layout(
         polar=dict(radialaxis=dict(visible=False)),
