@@ -163,26 +163,28 @@ def interpret_pca_loadings(pca_model, tactical_keys):
     print("Saved 'pca_interpretability_report.txt'")
 
 
-# ----------------------------------------------------------------
-# 4. MESH CONVERGENCE ANALYSIS
-# ----------------------------------------------------------------
-def run_mesh_convergence(match_limit=30):
-    """
-    Tests different grid resolutions to find the optimal balance between 
-    spatial nuance and vector sparsity.
-    """
+def run_mesh_convergence(match_limit=15):
     print(f"Starting Mesh Convergence Analysis on {match_limit} matches...")
     
-    # 1. Fetch a subset of events
-    matches = sb.matches(competition_id=11, season_id=27).head(match_limit)
+    # 1. Fetch matches (Force overlapping players by picking one team's matches)
+    matches = sb.matches(competition_id=11, season_id=27)
+    team_matches = matches[(matches['home_team'] == 'Barcelona') | (matches['away_team'] == 'Barcelona')]
+    
+    if len(team_matches) == 0:
+        team_matches = matches.head(match_limit * 3) 
+        
+    sample_matches = team_matches.head(match_limit)
+    
     events_list = []
-    for m_id in tqdm(matches['match_id'], desc="Fetching Match Events"):
+    from tqdm import tqdm
+    for m_id in tqdm(sample_matches['match_id'], desc="Fetching Match Events"):
         try:
             ev = sb.events(match_id=m_id)
             valid = ev.dropna(subset=['location', 'player']).copy()
+            valid['match_id'] = m_id # <--- CRITICAL FIX: Track the match ID
             if len(valid) > 0:
                 events_list.append(valid)
-        except:
+        except Exception as e:
             continue
             
     if not events_list:
@@ -193,17 +195,22 @@ def run_mesh_convergence(match_limit=30):
     df_events['x'] = df_events['location'].apply(lambda loc: loc[0])
     df_events['y'] = df_events['location'].apply(lambda loc: loc[1])
     
-    # 2. Define the meshes to test (Aspect ratio 1.5)
+    # 2. Define the meshes to test
     meshes = [[12, 8], [15, 10], [24, 16], [30, 20], [45, 30]]
     ratios = []
+    
+    from sklearn.preprocessing import StandardScaler
+    import numpy as np
     
     for bins in meshes:
         n_bins = bins[0] * bins[1]
         print(f"\nEvaluating Mesh: {bins[0]}x{bins[1]} ({n_bins} Spatial Dimensions)")
         
         dataset = []
-        for player, group in df_events.groupby('player'):
-            if len(group) < 15:
+        
+        # <--- CRITICAL FIX: Group by MATCH and PLAYER to get game-by-game vectors
+        for (match_id, player), group in df_events.groupby(['match_id', 'player']):
+            if len(group) < 15: # Player must have enough touches in this specific match
                 continue
                 
             heatmap, _, _ = np.histogram2d(
@@ -213,7 +220,6 @@ def run_mesh_convergence(match_limit=30):
             spatial_vector = heatmap.flatten()
             spatial_vector /= (spatial_vector.sum() + 1e-9)
             
-            # Dummy tactical vector for pure spatial separation test
             tactical_vector = [len(group)] * 16 
             
             dataset.append({
@@ -223,14 +229,26 @@ def run_mesh_convergence(match_limit=30):
             })
             
         df_mesh = pd.DataFrame(dataset)
+        
+        # <--- CRITICAL FIX: Filter out players who only played 1 match in the sample
+        player_counts = df_mesh['Player'].value_counts()
+        valid_players = player_counts[player_counts >= 2].index
+        df_mesh = df_mesh[df_mesh['Player'].isin(valid_players)]
+        
+        if len(df_mesh) < 5:
+            print("Not enough players with 2+ matches in this subset. Skipping...")
+            ratios.append(0)
+            continue
+            
         X_spatial = np.stack(df_mesh['Spatial'].values)
         X_tactical = StandardScaler().fit_transform(np.stack(df_mesh['Tactical'].values))
         X_master = np.hstack((X_spatial, X_tactical))
         
-        # Run Baseline Separation Test (PCA)
+        from src.linear_models import train_and_extract_pca
         pca_model, df_pca, df_pca_centroids = train_and_extract_pca(X_master, df_mesh['Player'].values, n_components=16)
         
         try:
+            # Now this will successfully compare Match A vs Match B for each player!
             _, _, ratio = evaluate_manifold_stability(df_pca, min_matches=2) 
             ratios.append(ratio)
             print(f"Separation Ratio: {ratio:.2f}x")
@@ -239,13 +257,25 @@ def run_mesh_convergence(match_limit=30):
             ratios.append(0)
             
     # 3. Plot the Convergence Curve
+    import matplotlib.pyplot as plt
+    if sum(ratios) == 0:
+        print("❌ All ratios returned 0. Try increasing match_limit.")
+        return
+        
     plt.figure(figsize=(10, 6))
     x_labels = [f"{b[0]}x{b[1]}\n({b[0]*b[1]} bins)" for b in meshes]
-    plt.plot(x_labels, ratios, marker='o', linewidth=2, color='red')
-    plt.title('Mesh Convergence Analysis: Spatial Resolution vs Latent Stability')
-    plt.xlabel('Grid Resolution (Bins)')
-    plt.ylabel('Separation Ratio (Higher is better)')
-    plt.grid(True, alpha=0.3)
+    plt.plot(x_labels, ratios, marker='o', linewidth=2, color='#FF007F')
+    
+    # Clean Dark Theme
+    plt.gca().set_facecolor('#1F2833')
+    plt.gcf().patch.set_facecolor('#0B0C10')
+    plt.title('Mesh Convergence Analysis: Spatial Resolution vs Latent Stability', color='white')
+    plt.xlabel('Grid Resolution (Bins)', color='white')
+    plt.ylabel('Separation Ratio (Higher is better)', color='white')
+    plt.xticks(color='white')
+    plt.yticks(color='white')
+    plt.grid(True, alpha=0.2, color='white')
+    
     plt.tight_layout()
-    plt.savefig('mesh_convergence.png')
-    print("\nSaved 'mesh_convergence.png'.")
+    plt.savefig('mesh_convergence.png', facecolor='#0B0C10')
+    print("\n✅ Saved populated 'mesh_convergence.png'.")
