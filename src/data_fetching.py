@@ -4,7 +4,7 @@ from statsbombpy import sb
 from tqdm import tqdm
 import os
 
-def build_league_dataset(comp_id=11, season_id=27, output_path="tactical_database.parquet"):
+def build_league_dataset(comp_id=11, season_id=27, output_path="tactical_database.parquet", mesh_bins=[24, 16]):
     """Fetches every player-match vector for an entire league season, with Kinematics."""
     print(f"Fetching match list for Comp: {comp_id}, Season: {season_id}...")
     matches = sb.matches(competition_id=comp_id, season_id=season_id)
@@ -61,6 +61,10 @@ def build_league_dataset(comp_id=11, season_id=27, output_path="tactical_databas
                 heatmap, _, _ = np.histogram2d(
                     locations[:, 0], locations[:, 1], 
                     bins=[12, 8], range=[[0, 120], [0, 80]]
+                )
+                heatmap, _, _ = np.histogram2d(
+                    locations[:, 0], locations[:, 1], 
+                    bins=mesh_bins, range=[[0, 120], [0, 80]]
                 )
                 spatial_vector = heatmap.flatten()
                 spatial_vector /= (spatial_vector.sum() + 1e-9) 
