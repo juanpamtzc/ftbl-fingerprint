@@ -41,7 +41,7 @@ def main():
     df_raw = pd.DataFrame(X_master, columns=[f'Spatial_{i}' for i in range(96)] + tactical_keys)
     df_raw['Player'] = player_names
     df_raw_centroids = df_raw.groupby('Player').mean()
-    df_raw_centroids.to_csv("raw_feature_centroids.csv")
+    df_raw_centroids.to_csv("./data/raw_feature_centroids.csv")
     
     print("\n--- 1. EVALUATING PCA BASELINE ---")
     pca_model, df_pca, df_pca_centroids = train_and_extract_pca(X_master, player_names, n_components=16)
@@ -58,11 +58,11 @@ def main():
     pd.DataFrame({
         'Model': ['PCA', 'VAE'],
         'Self_Distance_Baseline': [pca_same, vae_same]
-    }).set_index('Model').to_csv("model_metadata.csv")
+    }).set_index('Model').to_csv("./data/model_metadata.csv")
     
     print("\n--- 3. EXPORTING CENTROIDS FOR APP ---")
-    df_pca_centroids.to_csv("pca_centroids.csv")
-    df_vae_centroids.to_csv("vae_centroids.csv")
+    df_pca_centroids.to_csv("./data/pca_centroids.csv")
+    df_vae_centroids.to_csv("./data/vae_centroids.csv")
     print("Export Complete! You can now push the 4 new CSVs to GitHub.")
 
 if __name__ == "__main__":
