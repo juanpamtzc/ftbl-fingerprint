@@ -1,65 +1,46 @@
-"""
-Tactical Engine - Orchestration Pipeline
-Executes linear tracking baselines, non-linear deep learning, and grid validation.
-"""
+import pandas as pd
+import numpy as np
+import torch
+import os
+from sklearn.preprocessing import StandardScaler
 
-import logging
-from sklearn.metrics import mean_squared_error
-from src.data_fetching import get_raw_match_coordinates, get_coupled_signatures
-from src.linear_models import run_pca_analysis
-from src.ml_models import train_autoencoder, explain_autoencoder_black_box
-from src.verification_validation import run_mesh_convergence_study, validate_null_hypothesis
+from src.data_fetching import build_league_dataset
+from src.ml_models import train_and_extract_vae
+from src.linear_models import train_and_extract_pca
+from src.verification_validation import evaluate_manifold_stability
 
-# Global logging configurations
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger(__name__)
+def main():
+    data_path = "tactical_database.parquet"
+    if not os.path.exists(data_path):
+        print("Data not found. Initiating Fetch & Kinematic Extraction...")
+        df = build_league_dataset(output_path=data_path)
+    else:
+        print("Loading existing dataset...")
+        df = pd.read_parquet(data_path)
 
-
-def main() -> None:
-    logger.info("STARTING PRODUCTION TACTICAL PROFILE ENGINE...")
+    # Prepare Data
+    X_spatial = np.stack(df['spatial_vector'].values)
+    X_tactical = np.stack(df['tactical_vector'].values)
+    X_tactical_scaled = StandardScaler().fit_transform(X_tactical)
     
-    # 1. Structural Verification Block
-    raw_coords = get_raw_match_coordinates()
-    run_mesh_convergence_study(raw_coords)
+    X_master = np.hstack((X_spatial, X_tactical_scaled))
+    player_names = df['player_name'].values
     
-    # 2. Vector Extraction Block
-    X_spatial_m, X_tactical_m, X_coupled_m, features = get_coupled_signatures(player_name="Lionel Andrés Messi Cuccittini")
-    X_spatial_i, _, _, _ = get_coupled_signatures(player_name="Andrés Iniesta Luján")
+    print("\n--- 1. EVALUATING PCA BASELINE ---")
+    df_pca, df_pca_centroids = train_and_extract_pca(X_master, player_names, n_components=16)
+    _, _, pca_ratio = evaluate_manifold_stability(df_pca)
+    print(f"PCA Separation Ratio: {pca_ratio:.2f}x")
     
-    # 3. Target Uniqueness Validation Block
-    validate_null_hypothesis(X_target=X_spatial_m, X_control=X_spatial_i)
+    print("\n--- 2. EVALUATING VAE MANIFOLD ---")
+    X_tensor = torch.FloatTensor(X_master)
+    df_vae, df_vae_centroids = train_and_extract_vae(X_tensor, player_names, input_dim=X_master.shape[1])
+    _, _, vae_ratio = evaluate_manifold_stability(df_vae)
+    print(f"VAE Separation Ratio: {vae_ratio:.2f}x")
     
-    # 4. Linear Engine Execution (PCA Baseline Analysis)
-    _, _, pca_mse = run_pca_analysis(
-        X_coupled=X_coupled_m, 
-        spatial_dim=X_spatial_m.shape[1], 
-        tactical_features=features
-    )
-    
-    # 5. Non-Linear Deep Learning Network Block
-    trained_ae = train_autoencoder(X_coupled_m, latent_dim=3, epochs=1000)
-    
-    # Direct Error Comparison Assessment
-    import torch
-    X_tensor = torch.FloatTensor(X_coupled_m)
-    ae_reconstructed, _ = trained_ae(X_tensor)
-    ae_mse = float(mean_squared_error(X_coupled_m, ae_reconstructed.detach().numpy()))
-    
-    print("--- COMPRESSION MATCHUP RESULT ---")
-    print(f"Linear (PCA) Error:       {pca_mse:.6f}")
-    print(f"Non-Linear (AE) Error:    {ae_mse:.6f}")
-    improvement = ((pca_mse - ae_mse) / pca_mse) * 100
-    print(f">> Deep Autoencoder structural information loss reduction: {improvement:.2f}%\n")
-    
-    # 6. Interpretability Breakdown Block
-    explain_autoencoder_black_box(trained_ae, X_coupled_m, features)
-    
-    logger.info("ENGINE EXECUTION PIPELINE FULLY COMPLETED.")
-
+    print("\n--- 3. EXPORTING CENTROIDS FOR APP ---")
+    df_pca_centroids.to_csv("pca_centroids.csv")
+    df_vae_centroids.to_csv("vae_centroids.csv")
+    print("Export Complete! Run `streamlit run app.py` to view the engine.")
 
 if __name__ == "__main__":
     main()
