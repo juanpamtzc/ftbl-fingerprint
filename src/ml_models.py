@@ -1,74 +1,75 @@
-import logging
-from typing import Tuple, List
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import pandas as pd
 import numpy as np
 
-logger = logging.getLogger(__name__)
-
-
-class TacticalAutoencoder(nn.Module):
-    """Deep Convolutional/Linear Autoencoder to compress player action spaces."""
-    
-    def __init__(self, input_dim: int, latent_dim: int = 3):
-        """Initializes the autoencoder.
-        
-        Args:
-            input_dim: The number of features in the coupled matrix.
-            latent_dim: The desired bottleneck dimensionality.
-        """
-        super(TacticalAutoencoder, self).__init__()
-        
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, 128), nn.ReLU(),
-            nn.Linear(128, 32), nn.ReLU(),
-            nn.Linear(32, latent_dim)
+class TacticalVAE(nn.Module):
+    def __init__(self, input_dim, latent_dim):
+        super(TacticalVAE, self).__init__()
+        self.encoder_fc = nn.Sequential(
+            nn.Linear(input_dim, 64), nn.LayerNorm(64), nn.SiLU(),
+            nn.Linear(64, 32), nn.LayerNorm(32), nn.SiLU()
         )
+        self.fc_mu = nn.Linear(32, latent_dim)
+        self.fc_logvar = nn.Linear(32, latent_dim)
+        
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, 32), nn.ReLU(),
-            nn.Linear(32, 128), nn.ReLU(),
-            nn.Linear(128, input_dim)
+            nn.Linear(latent_dim, 32), nn.LayerNorm(32), nn.SiLU(),
+            nn.Linear(32, 64), nn.LayerNorm(64), nn.SiLU(),
+            nn.Linear(64, input_dim)
         )
+        
+    def encode(self, x):
+        h = self.encoder_fc(x)
+        return self.fc_mu(h), self.fc_logvar(h)
+        
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+        
+    def forward(self, x):
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        return self.decoder(z), mu, logvar
 
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        latent = self.encoder(x)
-        reconstructed = self.decoder(latent)
-        return reconstructed, latent
+def vae_loss_fn(recon_x, x, mu, logvar, beta=0.005):
+    recon_loss = nn.functional.mse_loss(recon_x, x, reduction='mean')
+    kl_loss = -0.5 * torch.mean(torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=1))
+    return recon_loss + beta * kl_loss
 
-
-def train_autoencoder(X_coupled: np.ndarray, latent_dim: int = 3, epochs: int = 1000) -> TacticalAutoencoder:
-    """Trains the PyTorch Autoencoder on the coupled feature matrix.
-
-    Args:
-        X_coupled: The standardized NumPy array combining spatial and tactical data.
-        latent_dim: The size of the bottleneck layer.
-        epochs: Number of training iterations.
-
-    Returns:
-        The trained TacticalAutoencoder model.
-    """
-    logger.info(f"Initializing PyTorch Autoencoder training for {epochs} epochs...")
-    X_tensor = torch.FloatTensor(X_coupled)
-    input_dim = X_coupled.shape[1]
+def train_and_extract_vae(X_tensor, player_names, input_dim, latent_dim=16, epochs=500):
+    """Trains the VAE and returns both the raw latent vectors and the aggregated centroids."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = TacticalVAE(input_dim, latent_dim).to(device)
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+    X_tensor = X_tensor.to(device)
     
-    model = TacticalAutoencoder(input_dim=input_dim, latent_dim=latent_dim)
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.005)
-    
+    print(f"Training {latent_dim}D VAE on {device} for {epochs} epochs...")
     model.train()
-    for epoch in range(epochs):
+    for _ in range(epochs):
         optimizer.zero_grad()
-        reconstructed, _ = model(X_tensor)
-        loss = criterion(reconstructed, X_tensor)
+        recon_batch, mu, logvar = model(X_tensor)
+        loss = vae_loss_fn(recon_batch, X_tensor, mu, logvar, beta=0.005)
         loss.backward()
         optimizer.step()
         
-        if (epoch + 1) % 250 == 0:
-            logger.debug(f"Epoch [{epoch+1}/{epochs}], Loss: {loss.item():.6f}")
-            
-    logger.info("Training complete.")
-    return model
+    model.eval()
+    with torch.no_grad():
+        latent_mu, _ = model.encode(X_tensor)
+        
+    # Build Raw Latent DataFrame
+    df_latent = pd.DataFrame(latent_mu.cpu().numpy(), columns=[f'Dim_{i+1}' for i in range(latent_dim)])
+    df_latent['Player'] = player_names
+    
+    # Build Centroids DataFrame
+    match_counts = df_latent['Player'].value_counts()
+    robust_players = match_counts[match_counts >= 10].index
+    df_robust = df_latent[df_latent['Player'].isin(robust_players)]
+    df_centroids = df_robust.groupby('Player').mean()
+    
+    return df_latent, df_centroids
 
 def explain_autoencoder_black_box(
     ae_model: nn.Module, X_coupled: np.ndarray, tactical_features: List[str]
