@@ -70,7 +70,7 @@ def train_and_extract_vae(X_tensor, player_names, input_dim, latent_dim=16, epoc
     df_robust = df_latent[df_latent['Player'].isin(robust_players)]
     df_centroids = df_robust.groupby('Player').mean()
     
-    return df_latent, df_centroids
+    return model, df_latent, df_centroids
 
 def explain_autoencoder_black_box(
     ae_model: nn.Module, X_coupled: np.ndarray, tactical_features: List[str]
