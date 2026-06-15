@@ -47,6 +47,13 @@ with st.expander("📖 How to use this engine"):
     * **VAE (Deep Neural Network):** A Variational Autoencoder that folds the dimensions into a non-linear continuous 16-dimensional space. Best for capturing complex, contextual behaviors.
     """)
 
+st.markdown("""
+### The Problem Statement
+Imagine you are in the coaching staff of a football team in the Spanish League in the 2015-16 season. You want to be prepared in case someone steals your best player, or maybe you have an experienced player who might get injured in the closing of the season...
+
+How replaceable are your players? Who would be suitable replacements based on more than gut-feeling?
+""")
+
 st.divider()
 
 # --- 3. SEARCH CONTROLS ---
