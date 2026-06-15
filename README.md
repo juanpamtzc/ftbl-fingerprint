@@ -15,7 +15,7 @@ Instead of relying on basic volume stats, this engine builds a **112+ Dimensiona
 
 ## Quick Start
 ```bash
-git clone [https://github.com/juanpamtzc/ftbl-fingerprint.git](https://github.com/juanpamtzc/ftbl-fingerprint.git)
+git clone https://github.com/juanpamtzc/ftbl-fingerprint.git
 cd ftbl-fingerprint
 pip install -r requirements.txt
 streamlit run app.py
