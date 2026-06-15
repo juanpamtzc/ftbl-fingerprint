@@ -62,10 +62,10 @@ with col_ctrl1:
     target_player = st.selectbox("Target Player to Scout:", players, 
                                  help="Select the player you are trying to replace.")
 with col_ctrl2:
-    model_choice = st.radio("Underlying AI Architecture:", 
+    model_choice = st.radio("Underlying Model:", 
                             ["PCA (Linear Baseline)", "VAE (Non-Linear Manifold)"], 
                             horizontal=True,
-                            help="Toggle the mathematical brain used to calculate similarities.")
+                            help="Toggle the mathematical model used to calculate similarities.")
 with col_ctrl3:
     n_results = st.slider("Top N Replacements:", 1, 10, 5, 
                           help="Number of similar players to display in the table.")
