@@ -1,11 +1,12 @@
 streamlit
-numpy
 pandas
-statsbombpy
-scikit-learn
+numpy
 torch
+scikit-learn
+scipy
 matplotlib
-seaborn
 plotly
 mplsoccer
-scipy
+statsbombpy
+tqdm
+pytest
