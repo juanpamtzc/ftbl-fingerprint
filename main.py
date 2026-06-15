@@ -14,7 +14,7 @@ from src.verification_validation import evaluate_manifold_stability, run_mesh_co
 def main():
     # --- MESH CONVERGENCE WORKFLOW ---
     # Optional: Uncomment the line below to run the mesh test once and generate the plot.
-    # run_mesh_convergence(match_limit=15)
+    #run_mesh_convergence(match_limit=15)
     
     # Once you pick the best resolution from the plot, set it here:
     OPTIMAL_MESH = [24, 16] 
