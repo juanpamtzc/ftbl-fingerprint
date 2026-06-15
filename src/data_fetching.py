@@ -1,134 +1,106 @@
-import logging
-from typing import List, Tuple
-import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
+import numpy as np
 from statsbombpy import sb
+from tqdm import tqdm
+import os
 
-logger = logging.getLogger(__name__)
-
-def get_raw_match_coordinates(
-    competition_id: int = 11, season_id: int = 22, player_name: str = "Lionel Andrés Messi Cuccittini"
-) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """Fetches matches and returns a list of raw (X,Y) coordinate arrays per match.
-
-    Args:
-        competition_id: The StatsBomb competition ID (Default: 11 for La Liga).
-        season_id: The StatsBomb season ID (Default: 22 for 2011/12).
-        player_name: The target player's full name.
-
-    Returns:
-        A list of tuples, where each tuple contains (X_coordinates, Y_coordinates) for a match.
-    """
-    logger.info(f"Fetching raw spatial coordinates for {player_name}...")
-    matches = sb.matches(competition_id=competition_id, season_id=season_id)
-    barca_matches = matches[(matches["home_team"] == "Barcelona") | (matches["away_team"] == "Barcelona")]
-    match_ids = barca_matches["match_id"].tolist()
-
-    match_coords = []
-
-    for m_id in match_ids:
-        try:
-            events = sb.events(match_id=m_id)
-            if "player" not in events.columns or "location" not in events.columns:
-                continue
-
-            player_events = events[(events["player"] == player_name) & (events["location"].notnull())]
-            if len(player_events) < 15:
-                continue
-
-            locations = np.array(player_events["location"].tolist())
-            match_coords.append((locations[:, 0], locations[:, 1]))
-        except Exception as e:
-            logger.debug(f"Failed to process match {m_id}: {e}")
-            continue
-
-    logger.info(f"Successfully extracted coordinates for {len(match_coords)} matches.")
-    return match_coords
-
-
-def get_coupled_signatures(
-    competition_id: int = 11,
-    season_id: int = 22,
-    mesh: Tuple[int, int] = (24, 16),
-    player_name: str = "Lionel Andrés Messi Cuccittini"
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
-    """Extracts both spatial and semantic tactical features, combining them into a coupled matrix.
-
-    Args:
-        competition_id: The StatsBomb competition ID.
-        season_id: The StatsBomb season ID.
-        mesh: A tuple representing the (X, Y) bins for the spatial grid.
-        player_name: The target player's full name.
-
-    Returns:
-        A tuple containing (Spatial Matrix, Scaled Tactical Matrix, Coupled Matrix, Feature Names).
-    """
-    logger.info(f"Extracting Dual-Signatures for {player_name}...")
-    matches = sb.matches(competition_id=competition_id, season_id=season_id)
-    barca_matches = matches[(matches["home_team"] == "Barcelona") | (matches["away_team"] == "Barcelona")]
-    match_ids = barca_matches["match_id"].tolist()
-
-    spatial_matrices, tactical_matrices = [], []
+def build_league_dataset(comp_id=11, season_id=27, output_path="tactical_database.parquet"):
+    """Fetches every player-match vector for an entire league season, with Kinematics."""
+    print(f"Fetching match list for Comp: {comp_id}, Season: {season_id}...")
+    matches = sb.matches(competition_id=comp_id, season_id=season_id)
+    match_ids = matches['match_id'].tolist()
+    
+    dataset = []
     tactical_keys = [
-        "passes_attempted", "pass_completion_pct", "shots",
-        "goals", "assists", "carries", "dribbles", "fouls_won"
+        'passes_attempted', 'pass_completion_pct', 'shots', 
+        'goals', 'assists', 'carries', 'dribbles', 'fouls_won',
+        'interceptions', 'tackles', 'clearances',
+        'avg_action_velocity', 'max_action_velocity', 
+        'explosive_bursts', 'total_action_distance', 'avg_deceleration'
     ]
-
-    for m_id in match_ids:
+    
+    print(f"Processing {len(match_ids)} matches...")
+    for m_id in tqdm(match_ids):
         try:
             events = sb.events(match_id=m_id)
-            if "player" not in events.columns:
+            if 'player' not in events.columns or 'location' not in events.columns:
                 continue
-
-            player_events = events[events["player"] == player_name]
-            if len(player_events) < 15:
-                continue
-
-            # 1. SPATIAL SIGNATURE
-            loc_events = player_events[player_events["location"].notnull()]
-            locations = np.array(loc_events["location"].tolist())
-            heatmap, _, _ = np.histogram2d(
-                locations[:, 0], locations[:, 1], bins=[mesh[0], mesh[1]], range=[[0, 120], [0, 80]]
-            )
-            spatial_vector = heatmap.flatten()
-            spatial_vector /= (spatial_vector.sum() + 1e-9)
-
-            # 2. TACTICAL ACTION SIGNATURE
-            tactical_stats = {key: 0.0 for key in tactical_keys}
-            tactical_stats["passes_attempted"] = len(player_events[player_events["type"] == "Pass"])
-
-            if "pass_outcome" in player_events.columns and tactical_stats["passes_attempted"] > 0:
-                completed = len(player_events[(player_events["type"] == "Pass") & (player_events["pass_outcome"].isnull())])
-                tactical_stats["pass_completion_pct"] = completed / tactical_stats["passes_attempted"]
-
-            tactical_stats["shots"] = len(player_events[player_events["type"] == "Shot"])
-            if "shot_outcome" in player_events.columns:
-                tactical_stats["goals"] = len(player_events[(player_events["type"] == "Shot") & (player_events["shot_outcome"] == "Goal")])
-
-            if "pass_goal_assist" in player_events.columns:
-                tactical_stats["assists"] = len(player_events[(player_events["type"] == "Pass") & (player_events["pass_goal_assist"] == True)])
-
-            tactical_stats["carries"] = len(player_events[player_events["type"] == "Carry"])
-            tactical_stats["dribbles"] = len(player_events[player_events["type"] == "Dribble"])
-            tactical_stats["fouls_won"] = len(player_events[player_events["type"] == "Foul Won"])
-
-            tactical_vector = np.array([tactical_stats[k] for k in tactical_keys])
-
-            spatial_matrices.append(spatial_vector)
-            tactical_matrices.append(tactical_vector)
-
+            
+            # Kinematics Engine
+            events['time_seconds'] = pd.to_timedelta(events['timestamp']).dt.total_seconds()
+            valid_locs = events.dropna(subset=['location', 'player']).copy()
+            valid_locs['x'] = valid_locs['location'].apply(lambda loc: loc[0])
+            valid_locs['y'] = valid_locs['location'].apply(lambda loc: loc[1])
+            
+            valid_locs = valid_locs.sort_values(['player', 'time_seconds'])
+            grouped = valid_locs.groupby('player')
+            
+            valid_locs['dt'] = grouped['time_seconds'].diff()
+            valid_locs['dx'] = grouped['x'].diff()
+            valid_locs['dy'] = grouped['y'].diff()
+            valid_locs['dist'] = np.sqrt(valid_locs['dx']**2 + valid_locs['dy']**2)
+            
+            valid_locs['velocity'] = (valid_locs['dist'] / (valid_locs['dt'] + 1e-6)).clip(upper=10.0)
+            valid_locs['dv'] = grouped['velocity'].diff()
+            valid_locs['acceleration'] = (valid_locs['dv'] / (valid_locs['dt'] + 1e-6)).clip(lower=-6.0, upper=6.0)
+            
+            players_in_match = events['player'].dropna().unique()
+            
+            for player in players_in_match:
+                player_events = events[events['player'] == player]
+                player_kinematics = valid_locs[valid_locs['player'] == player]
+                
+                if len(player_events) < 15:
+                    continue
+                    
+                loc_events = player_events[player_events['location'].notnull()]
+                if len(loc_events) == 0:
+                    continue
+                    
+                locations = np.array(loc_events['location'].tolist())
+                heatmap, _, _ = np.histogram2d(
+                    locations[:, 0], locations[:, 1], 
+                    bins=[12, 8], range=[[0, 120], [0, 80]]
+                )
+                spatial_vector = heatmap.flatten()
+                spatial_vector /= (spatial_vector.sum() + 1e-9) 
+                
+                tactical_stats = {key: 0.0 for key in tactical_keys}
+                tactical_stats['passes_attempted'] = len(player_events[player_events['type'] == 'Pass'])
+                if 'pass_outcome' in player_events.columns and tactical_stats['passes_attempted'] > 0:
+                    completed = len(player_events[(player_events['type'] == 'Pass') & (player_events['pass_outcome'].isnull())])
+                    tactical_stats['pass_completion_pct'] = completed / tactical_stats['passes_attempted']
+                
+                tactical_stats['shots'] = len(player_events[player_events['type'] == 'Shot'])
+                tactical_stats['carries'] = len(player_events[player_events['type'] == 'Carry'])
+                tactical_stats['dribbles'] = len(player_events[player_events['type'] == 'Dribble'])
+                tactical_stats['interceptions'] = len(player_events[player_events['type'] == 'Interception'])
+                
+                if 'shot_outcome' in player_events.columns:
+                    tactical_stats['goals'] = len(player_events[(player_events['type'] == 'Shot') & (player_events['shot_outcome'] == 'Goal')])
+                if 'pass_goal_assist' in player_events.columns:
+                    tactical_stats['assists'] = len(player_events[(player_events['type'] == 'Pass') & (player_events['pass_goal_assist'] == True)])
+                    
+                if len(player_kinematics) > 1:
+                    tactical_stats['avg_action_velocity'] = player_kinematics['velocity'].mean()
+                    tactical_stats['max_action_velocity'] = player_kinematics['velocity'].max()
+                    tactical_stats['explosive_bursts'] = (player_kinematics['acceleration'] >= 3.0).sum()
+                    tactical_stats['total_action_distance'] = player_kinematics['dist'].sum()
+                    decel = player_kinematics[player_kinematics['acceleration'] < 0]['acceleration']
+                    tactical_stats['avg_deceleration'] = decel.mean() if len(decel) > 0 else 0.0
+                
+                tactical_vector = [np.nan_to_num(tactical_stats[k]) for k in tactical_keys]
+                
+                dataset.append({
+                    'match_id': m_id,
+                    'player_name': player,
+                    'spatial_vector': spatial_vector.tolist(),
+                    'tactical_vector': tactical_vector
+                })
         except Exception as e:
-            logger.debug(f"Failed to process match {m_id}: {e}")
             continue
-
-    X_spatial = np.array(spatial_matrices)
-    X_tactical_raw = np.array(tactical_matrices)
-
-    # Standardization
-    scaler = StandardScaler()
-    X_tactical_scaled = scaler.fit_transform(X_tactical_raw)
-    X_coupled = np.hstack((X_spatial, X_tactical_scaled))
-
-    logger.info(f"Extraction Complete. Coupled Shape: {X_coupled.shape}")
-    return X_spatial, X_tactical_raw, X_tactical_scaled, X_coupled, tactical_keys
+            
+    df = pd.DataFrame(dataset)
+    df.to_parquet(output_path)
+    print(f"\nDataset built! Total Player-Match Vectors: {len(df)}")
+    return df
