@@ -98,10 +98,10 @@ if clones_count == 0:
     st.info(f"**{target_player} is a Gem.** There are no players in this database who replicate their output seamlessly. You will have to change your tactical system if they leave.", icon="⚠️")
 elif clones_count <= 3:
     replaceability_tier = "⭐ HARD TO REPLACE"
-    st.warning(f"**{target_player} has a Rare Profile.** There are only {clones_count} true tactical twins in the league. Securing a replacement will be highly competitive.", icon="🔍")
+    st.warning(f"**{target_player} has a Rare Profile.** There are only {clones_count} tactical replacements in the league. Securing a replacement will be highly competitive.", icon="🔍")
 else:
     replaceability_tier = "🔄 REPLACEABLE"
-    st.success(f"**{target_player} has a Standard Profile.** There are {clones_count} players who provide an identical tactical footprint. You have high leverage in the transfer market.", icon="✅")
+    st.success(f"**{target_player} has a Standard Profile.** There are {clones_count} players who replace the tactical footprint of the selected player. You have high leverage in the transfer market.", icon="✅")
 
 col_metric1, col_metric2, col_metric3 = st.columns(3)
 col_metric1.metric("Market Status", replaceability_tier)
