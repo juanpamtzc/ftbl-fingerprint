@@ -39,7 +39,7 @@ with st.expander("📖 How to use this engine"):
     st.markdown("""
     **For Non-Technical Users:**
     * **Self-Variance Multiplier:** Players play slightly differently every game. A score of `1.0x` means a replacement plays as similar to the target as the target does to themselves across a season. 
-    * * **< 1.0x (True Twins):** The replacement is statistically indistinguishable from the target.
+    * * **< 1.0x (Good Replacement):** The replacement is statistically indistinguishable from the target.
     * * **> 2.0x (Different Profile):** The replacement plays a fundamentally different role on the pitch.
     
     **For Technical Users:**
