@@ -16,4 +16,5 @@ def train_and_extract_pca(X_master, player_names, n_components=16):
     df_robust = df_pca[df_pca['Player'].isin(robust_players)]
     df_centroids = df_robust.groupby('Player').mean()
     
-    return df_pca, df_centroids
+    # FIX: Return the pca model as the first argument
+    return pca, df_pca, df_centroids
