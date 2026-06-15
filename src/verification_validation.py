@@ -7,6 +7,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from scipy.spatial.distance import euclidean
+from statsbombpy import sb
+from tqdm import tqdm
+from sklearn.preprocessing import StandardScaler
+from src.linear_models import train_and_extract_pca
 
 # Import model architecture for validation testing
 from src.ml_models import TacticalVAE, vae_loss_fn
@@ -157,3 +161,91 @@ def interpret_pca_loadings(pca_model, tactical_keys):
     with open("pca_interpretability_report.txt", "w") as f:
         f.write("\n".join(report))
     print("Saved 'pca_interpretability_report.txt'")
+
+
+# ----------------------------------------------------------------
+# 4. MESH CONVERGENCE ANALYSIS
+# ----------------------------------------------------------------
+def run_mesh_convergence(match_limit=30):
+    """
+    Tests different grid resolutions to find the optimal balance between 
+    spatial nuance and vector sparsity.
+    """
+    print(f"Starting Mesh Convergence Analysis on {match_limit} matches...")
+    
+    # 1. Fetch a subset of events
+    matches = sb.matches(competition_id=11, season_id=27).head(match_limit)
+    events_list = []
+    for m_id in tqdm(matches['match_id'], desc="Fetching Match Events"):
+        try:
+            ev = sb.events(match_id=m_id)
+            valid = ev.dropna(subset=['location', 'player']).copy()
+            if len(valid) > 0:
+                events_list.append(valid)
+        except:
+            continue
+            
+    if not events_list:
+        print("Failed to pull events for convergence test.")
+        return
+        
+    df_events = pd.concat(events_list, ignore_index=True)
+    df_events['x'] = df_events['location'].apply(lambda loc: loc[0])
+    df_events['y'] = df_events['location'].apply(lambda loc: loc[1])
+    
+    # 2. Define the meshes to test (Aspect ratio 1.5)
+    meshes = [[12, 8], [15, 10], [24, 16], [30, 20], [45, 30]]
+    ratios = []
+    
+    for bins in meshes:
+        n_bins = bins[0] * bins[1]
+        print(f"\nEvaluating Mesh: {bins[0]}x{bins[1]} ({n_bins} Spatial Dimensions)")
+        
+        dataset = []
+        for player, group in df_events.groupby('player'):
+            if len(group) < 15:
+                continue
+                
+            heatmap, _, _ = np.histogram2d(
+                group['x'], group['y'], 
+                bins=bins, range=[[0, 120], [0, 80]]
+            )
+            spatial_vector = heatmap.flatten()
+            spatial_vector /= (spatial_vector.sum() + 1e-9)
+            
+            # Dummy tactical vector for pure spatial separation test
+            tactical_vector = [len(group)] * 16 
+            
+            dataset.append({
+                'Player': player,
+                'Spatial': spatial_vector.tolist(),
+                'Tactical': tactical_vector
+            })
+            
+        df_mesh = pd.DataFrame(dataset)
+        X_spatial = np.stack(df_mesh['Spatial'].values)
+        X_tactical = StandardScaler().fit_transform(np.stack(df_mesh['Tactical'].values))
+        X_master = np.hstack((X_spatial, X_tactical))
+        
+        # Run Baseline Separation Test (PCA)
+        pca_model, df_pca, df_pca_centroids = train_and_extract_pca(X_master, df_mesh['Player'].values, n_components=16)
+        
+        try:
+            _, _, ratio = evaluate_manifold_stability(df_pca, min_matches=2) 
+            ratios.append(ratio)
+            print(f"Separation Ratio: {ratio:.2f}x")
+        except Exception as e:
+            print(f"Error calculating stability: {e}")
+            ratios.append(0)
+            
+    # 3. Plot the Convergence Curve
+    plt.figure(figsize=(10, 6))
+    x_labels = [f"{b[0]}x{b[1]}\n({b[0]*b[1]} bins)" for b in meshes]
+    plt.plot(x_labels, ratios, marker='o', linewidth=2, color='red')
+    plt.title('Mesh Convergence Analysis: Spatial Resolution vs Latent Stability')
+    plt.xlabel('Grid Resolution (Bins)')
+    plt.ylabel('Separation Ratio (Higher is better)')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig('mesh_convergence.png')
+    print("\nSaved 'mesh_convergence.png'.")
