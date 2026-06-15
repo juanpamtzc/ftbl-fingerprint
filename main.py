@@ -7,15 +7,25 @@ from sklearn.preprocessing import StandardScaler
 from src.data_fetching import build_league_dataset
 from src.ml_models import train_and_extract_vae
 from src.linear_models import train_and_extract_pca
-from src.verification_validation import evaluate_manifold_stability
+
+# FIX 1: Import the convergence tool
+from src.verification_validation import evaluate_manifold_stability, run_mesh_convergence
 
 def main():
+    # --- MESH CONVERGENCE WORKFLOW ---
+    # Optional: Uncomment the line below to run the mesh test once and generate the plot.
+    # run_mesh_convergence(match_limit=15)
+    
+    # Once you pick the best resolution from the plot, set it here:
+    OPTIMAL_MESH = [24, 16] 
+    
     data_path = "tactical_database.parquet"
     
     # Check if data exists
     if not os.path.exists(data_path):
-        print("Data not found. Initiating Fetch & Kinematic Extraction...")
-        df = build_league_dataset(output_path=data_path)
+        print(f"Data not found. Initiating Fetch with high-res {OPTIMAL_MESH[0]}x{OPTIMAL_MESH[1]} mesh...")
+        # FIX 2: Pass the dynamic mesh to your dataset builder
+        df = build_league_dataset(output_path=data_path, mesh_bins=OPTIMAL_MESH)
     else:
         print("Loading existing dataset...")
         df = pd.read_parquet(data_path)
@@ -31,14 +41,24 @@ def main():
     X_spatial = np.stack(df['spatial_vector'].values)
     X_tactical = np.stack(df['tactical_vector'].values)
     
+    # FIX 3: Make the script completely mesh-independent by measuring the array size
+    n_spatial_dimensions = X_spatial.shape[1]
+    
     scaler = StandardScaler()
     X_tactical_scaled = scaler.fit_transform(X_tactical)
     X_master = np.hstack((X_spatial, X_tactical_scaled))
     player_names = df['player_name'].values
     
+    # Ensure data directory exists
+    os.makedirs("./data", exist_ok=True)
+    
     # --- EXPORT RAW FEATURES FOR STREAMLIT UI ---
-    print("Exporting raw features for UI plotting...")
-    df_raw = pd.DataFrame(X_master, columns=[f'Spatial_{i}' for i in range(96)] + tactical_keys)
+    print(f"Exporting raw features for UI plotting ({n_spatial_dimensions} Spatial dims)...")
+    
+    # FIX 4: Use the dynamic spatial dimensions instead of a hardcoded 96
+    spatial_labels = [f'Spatial_{i}' for i in range(n_spatial_dimensions)]
+    df_raw = pd.DataFrame(X_master, columns=spatial_labels + tactical_keys)
+    
     df_raw['Player'] = player_names
     df_raw_centroids = df_raw.groupby('Player').mean()
     df_raw_centroids.to_csv("./data/raw_feature_centroids.csv")
