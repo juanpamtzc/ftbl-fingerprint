@@ -7,7 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from mplsoccer import Pitch
 
-st.set_page_config(page_title="AI Scouting Engine", layout="wide")
+st.set_page_config(page_title="Data-Driven Scouting Engine", layout="wide")
 
 # --- 1. LOAD PRE-COMPUTED DATA ---
 @st.cache_data
@@ -33,18 +33,18 @@ tactical_keys = [
 ]
 
 # --- 2. UI HEADER & EDUCATIONAL GLOSSARY ---
-st.title("⚽ Intelligent Tactical Scouting Engine")
+st.title("Data-Driven Tactical Scouting Engine ⚽️")
 
-with st.expander("📖 How to use this engine (Glossary)"):
+with st.expander("📖 How to use this engine"):
     st.markdown("""
     **For Non-Technical Users:**
-    * **Self-Variance Multiplier:** Players are not robots; they play slightly differently every game. A score of `1.0x` means a replacement plays exactly as similar to the target as the target does to themselves across a season. 
+    * **Self-Variance Multiplier:** Players play slightly differently every game. A score of `1.0x` means a replacement plays as similar to the target as the target does to themselves across a season. 
     * **Scores < 1.0x (True Twins):** The replacement is statistically indistinguishable from the target.
     * **Scores > 2.0x (Different Profile):** The replacement plays a fundamentally different role on the pitch.
     
     **For Technical Users:**
     * **PCA (Linear Baseline):** Projects the 112 features onto 16 orthogonal axes. Best for isolating massive volume differences (like total passes or total distance).
-    * **VAE (Deep Neural Network):** A Variational Autoencoder that folds the dimensions into a non-linear continuous space. Best for capturing complex, contextual behaviors.
+    * **VAE (Deep Neural Network):** A Variational Autoencoder that folds the dimensions into a non-linear continuous 16-dimensional space. Best for capturing complex, contextual behaviors.
     """)
 
 st.divider()
@@ -87,13 +87,13 @@ clones_count = len(df_others[df_others['Distance Multiplier'] <= 1.0])
 peers_count = len(df_others[(df_others['Distance Multiplier'] > 1.0) & (df_others['Distance Multiplier'] <= 2.0)])
 
 if clones_count == 0:
-    replaceability_tier = "🦄 IRREPLACEABLE (Unicorn)"
-    st.info(f"**{target_player} is a Unicorn.** There are no players in this database who replicate their output seamlessly. You will have to change your tactical system if they leave.", icon="⚠️")
+    replaceability_tier = "💎 IRREPLACEABLE"
+    st.info(f"**{target_player} is a Gem.** There are no players in this database who replicate their output seamlessly. You will have to change your tactical system if they leave.", icon="⚠️")
 elif clones_count <= 3:
-    replaceability_tier = "⭐ HARD TO REPLACE (Rare)"
+    replaceability_tier = "⭐ HARD TO REPLACE"
     st.warning(f"**{target_player} has a Rare Profile.** There are only {clones_count} true tactical twins in the league. Securing a replacement will be highly competitive.", icon="🔍")
 else:
-    replaceability_tier = "🔄 REPLACEABLE (Standard Profile)"
+    replaceability_tier = "🔄 REPLACEABLE"
     st.success(f"**{target_player} has a Standard Profile.** There are {clones_count} players who provide an identical tactical footprint. You have high leverage in the transfer market.", icon="✅")
 
 col_metric1, col_metric2, col_metric3 = st.columns(3)
