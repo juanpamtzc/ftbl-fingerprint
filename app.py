@@ -12,10 +12,10 @@ st.set_page_config(page_title="Data-Driven Scouting Engine", layout="wide")
 # --- 1. LOAD PRE-COMPUTED DATA ---
 @st.cache_data
 def load_data():
-    pca_df = pd.read_csv("pca_centroids.csv", index_col="Player")
-    vae_df = pd.read_csv("vae_centroids.csv", index_col="Player")
-    raw_df = pd.read_csv("raw_feature_centroids.csv", index_col="Player")
-    meta_df = pd.read_csv("model_metadata.csv", index_col="Model")
+    pca_df = pd.read_csv("./data/pca_centroids.csv", index_col="Player")
+    vae_df = pd.read_csv("./data/vae_centroids.csv", index_col="Player")
+    raw_df = pd.read_csv("./data/raw_feature_centroids.csv", index_col="Player")
+    meta_df = pd.read_csv("./data/model_metadata.csv", index_col="Model")
     return pca_df, vae_df, raw_df, meta_df
 
 try:
