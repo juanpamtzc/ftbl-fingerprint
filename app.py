@@ -33,7 +33,7 @@ tactical_keys = [
 ]
 
 # --- 2. UI HEADER & EDUCATIONAL GLOSSARY ---
-st.title("Data-Driven Tactical Scouting Engine ⚽️")
+st.title("Data-Driven Tactical Scouting Engine")
 
 with st.expander("📖 How to use this engine"):
     st.markdown("""
